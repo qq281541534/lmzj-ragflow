@@ -20,19 +20,16 @@
 - 开启 **Required reviewers**（至少 1 名人类），用于 deploy workflow 的人工部署确认门
 - 可选：deployment branch 限制
 
-### 2. Environment secrets（`production`）
+> 关键分层：`build-images` job 不声明 `environment`（构建须自动跑），因此 ACR 凭证与镜像坐标必须放**仓库级**，否则构建读不到。`deploy` job 声明 `environment: production`，可同时读仓库级与环境级，所以 ACR 凭证放仓库级不影响部署。生产服务器相关 secrets 放 `production` environment，受 required reviewers 门控。
+
+### 2. 仓库级 secrets（Settings → Secrets and variables → Actions → Secrets）
 
 | Secret | 用途 |
 |---|---|
 | `ALIYUN_ACR_USERNAME` | ACR 登录用户名 |
 | `ALIYUN_ACR_PASSWORD` | ACR 登录密码 / token |
-| `PROD_SSH_HOST` | 生产服务器地址 |
-| `PROD_SSH_PORT` | SSH 端口 |
-| `PROD_SSH_USER` | SSH 用户 |
-| `PROD_SSH_KEY` | SSH 私钥 |
-| `PROD_DEPLOY_PATH` | 生产 compose 部署目录 |
 
-### 3. Actions variables（repo 或 `production` environment）
+### 3. 仓库级 variables（Settings → Secrets and variables → Actions → Variables）
 
 | Variable | 值 |
 |---|---|
@@ -40,7 +37,17 @@
 | `ACR_NAMESPACE` | `lmzjai` |
 | `ACR_REPOSITORY` | `ragflow-lmzj` |
 
-### 4. Branch protection / ruleset（`dev` 与 `main`）
+### 4. `production` environment secrets（受 required reviewers 门控，部署专用）
+
+| Secret | 用途 |
+|---|---|
+| `PROD_SSH_HOST` | 生产服务器地址 |
+| `PROD_SSH_PORT` | SSH 端口 |
+| `PROD_SSH_USER` | SSH 用户 |
+| `PROD_SSH_KEY` | SSH 私钥 |
+| `PROD_DEPLOY_PATH` | 生产 compose 部署目录 |
+
+### 5. Required reviewers + Branch protection / ruleset（`dev` 与 `main`）
 
 - Require a pull request before merging
 - Require status checks to pass：绑定 `pr-check` 的稳定 final check（job 名 `pr-check-result`）
