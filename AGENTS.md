@@ -108,3 +108,13 @@ docker compose -f docker-compose.yml up -d
   pre-commit run --all-files
   ```
 
+## 6. AI Issue-to-Production 交付流程（二开 / public / ACR）
+
+本仓库是 `infiniflow/ragflow` 的二开 fork，采用公司 AI Issue-to-Production 流程。Issue / PR / 镜像构建 / 部署 / 回滚工作前先使用 `ai-issue-to-production` skill；不能自动加载时从公司级 skill 源仓库读取。
+
+- 发布源 = PR target = 镜像构建源：`dev`；不直接提交 `dev` / `main`，一律走 PR。
+- 上游基线 `main`；上游同步是独立关口。
+- 生产镜像 `registry.cn-chengdu.aliyuncs.com/lmzjai/ragflow-lmzj:<完整40位SHA>`，禁 `latest` / 短 SHA。
+- PR 用 `Refs #<issue>`，禁 `Closes/Fixes/Resolves`；PR 合并 ≠ 部署；部署仅人工确认完整 SHA 后触发；生产 pull-only。
+- 流程与运维文档见 `lmzj-docs/`（禁止写入上游 `docs/`）。
+

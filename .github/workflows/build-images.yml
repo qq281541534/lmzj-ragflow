@@ -1,0 +1,103 @@
+name: build-images
+
+# 仅从发布源 dev 构建不可变完整 SHA 镜像并推送 ACR。
+# non-runtime 变更（docs / process / release-governance）不 login / build / push。
+# 生产部署是独立关口，本 workflow 不部署。
+
+on:
+  push:
+    branches:
+      - dev
+  workflow_dispatch:
+    inputs:
+      force_build:
+        description: "强制构建（忽略 change-scope 跳过）"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: build-images-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  detect-change-scope:
+    runs-on: ubuntu-latest
+    outputs:
+      build_needed: ${{ steps.scope.outputs.build_needed }}
+      scope: ${{ steps.scope.outputs.scope }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Compute scope
+        id: scope
+        run: |
+          set -euo pipefail
+          BEFORE="${{ github.event.before }}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || \
+             [ -z "${BEFORE}" ] || [ "${BEFORE}" = "0000000000000000000000000000000000000000" ]; then
+            echo "无法可靠 diff，保守按需构建（unknown）"
+            echo "scope=unknown" >> "$GITHUB_OUTPUT"
+            echo "build_needed=true" >> "$GITHUB_OUTPUT"
+          else
+            CHANGED=$(git diff --name-only "${BEFORE}" "${{ github.sha }}")
+            echo "Changed files:"; echo "${CHANGED}"
+            echo "${CHANGED}" | python3 scripts/detect_change_scope.py
+          fi
+
+  verify-source:
+    needs: detect-change-scope
+    if: ${{ needs.detect-change-scope.outputs.build_needed == 'true' || inputs.force_build }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 校验 commit 来自合并进 dev 的 PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SOURCE: dev
+        run: python3 scripts/check_image_build_source.py "${{ github.sha }}"
+
+  build-and-push:
+    needs: [detect-change-scope, verify-source]
+    if: ${{ needs.detect-change-scope.outputs.build_needed == 'true' || inputs.force_build }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate full 40-char SHA
+        run: |
+          set -euo pipefail
+          SHA="${{ github.sha }}"
+          echo "${SHA}" | grep -Eq '^[0-9a-f]{40}$' || { echo "非法 SHA: ${SHA}"; exit 1; }
+
+      - name: Login to ACR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ vars.ACR_REGISTRY }}
+          username: ${{ secrets.ALIYUN_ACR_USERNAME }}
+          password: ${{ secrets.ALIYUN_ACR_PASSWORD }}
+
+      - name: Build and push immutable image
+        run: |
+          set -euo pipefail
+          IMAGE="${{ vars.ACR_REGISTRY }}/${{ vars.ACR_NAMESPACE }}/${{ vars.ACR_REPOSITORY }}:${{ github.sha }}"
+          echo "Building ${IMAGE}"
+          docker build --build-arg NEED_MIRROR=1 -t "${IMAGE}" -f Dockerfile .
+          docker push "${IMAGE}"
+          echo "### 镜像已构建" >> "$GITHUB_STEP_SUMMARY"
+          echo "- \`${IMAGE}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- digest: $(docker inspect --format='{{index .RepoDigests 0}}' "${IMAGE}" 2>/dev/null || echo 'n/a')" >> "$GITHUB_STEP_SUMMARY"
+
+  skip-note:
+    needs: detect-change-scope
+    if: ${{ needs.detect-change-scope.outputs.build_needed != 'true' && !inputs.force_build }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Non-runtime change — 跳过镜像构建
+        run: |
+          echo "scope=${{ needs.detect-change-scope.outputs.scope }} → 不构建/推送生产镜像"
+          echo "### 跳过镜像构建（${{ needs.detect-change-scope.outputs.scope }}）" >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,67 @@
+name: deploy
+
+# 生产部署：仅人工 workflow_dispatch + production environment 审批。
+# 只接受完整 40 位 commit SHA；生产服务器只拉取镜像，不构建。
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_sha:
+        description: "要部署的完整 40 位 commit SHA（禁 latest / 短 SHA）"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production   # 触发 required reviewer 审批门
+    steps:
+      - name: Validate full 40-char SHA
+        run: |
+          set -euo pipefail
+          SHA="${{ inputs.image_sha }}"
+          if ! echo "${SHA}" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "拒绝部署：image_sha 必须是完整 40 位小写 hex SHA，收到 '${SHA}'"
+            exit 1
+          fi
+          echo "IMAGE=${{ vars.ACR_REGISTRY }}/${{ vars.ACR_NAMESPACE }}/${{ vars.ACR_REPOSITORY }}:${SHA}" >> "$GITHUB_ENV"
+
+      - name: Setup SSH key
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          echo "${{ secrets.PROD_SSH_KEY }}" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          ssh-keyscan -p "${{ secrets.PROD_SSH_PORT }}" -H "${{ secrets.PROD_SSH_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Copy pull-only deploy script
+        run: |
+          set -euo pipefail
+          scp -i ~/.ssh/id_deploy -P "${{ secrets.PROD_SSH_PORT }}" \
+            scripts/deploy_pull_only.sh \
+            "${{ secrets.PROD_SSH_USER }}@${{ secrets.PROD_SSH_HOST }}:${{ secrets.PROD_DEPLOY_PATH }}/deploy_pull_only.sh"
+
+      - name: Pull-only deploy on production
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/id_deploy -p "${{ secrets.PROD_SSH_PORT }}" \
+            "${{ secrets.PROD_SSH_USER }}@${{ secrets.PROD_SSH_HOST }}" \
+            "ACR_REGISTRY='${{ vars.ACR_REGISTRY }}' \
+             ACR_USERNAME='${{ secrets.ALIYUN_ACR_USERNAME }}' \
+             ACR_PASSWORD='${{ secrets.ALIYUN_ACR_PASSWORD }}' \
+             RAGFLOW_IMAGE='${IMAGE}' \
+             DEPLOY_PATH='${{ secrets.PROD_DEPLOY_PATH }}' \
+             bash '${{ secrets.PROD_DEPLOY_PATH }}/deploy_pull_only.sh'"
+
+      - name: Record deployment
+        run: |
+          echo "### 已部署" >> "$GITHUB_STEP_SUMMARY"
+          echo "- 镜像: \`${IMAGE}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- 回滚: 将 RAGFLOW_IMAGE 切回上一版完整 SHA 镜像后重启" >> "$GITHUB_STEP_SUMMARY"
