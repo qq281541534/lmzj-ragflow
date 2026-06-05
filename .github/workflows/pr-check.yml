@@ -1,0 +1,84 @@
+name: pr-check
+
+on:
+  pull_request:
+    branches:
+      - dev
+      - main
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: pr-check-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  detect-change-scope:
+    runs-on: ubuntu-latest
+    outputs:
+      scope: ${{ steps.scope.outputs.scope }}
+      build_needed: ${{ steps.scope.outputs.build_needed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Compute changed files and scope
+        id: scope
+        run: |
+          set -euo pipefail
+          BASE="origin/${{ github.event.pull_request.base.ref }}"
+          git fetch --no-tags --depth=1 origin "${{ github.event.pull_request.base.ref }}"
+          CHANGED=$(git diff --name-only "${BASE}...HEAD")
+          echo "Changed files:"; echo "${CHANGED}"
+          echo "${CHANGED}" | python3 scripts/detect_change_scope.py
+      - name: Report scope
+        run: echo "scope=${{ steps.scope.outputs.scope }} build_needed=${{ steps.scope.outputs.build_needed }}"
+
+  process-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: PR process lint
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: python3 scripts/pr_process_lint.py
+
+  runtime-check:
+    needs: detect-change-scope
+    if: ${{ needs.detect-change-scope.outputs.build_needed == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+      - name: Ruff lint
+        run: uvx ruff check .
+      - name: Ruff format check
+        run: uvx ruff format --check .
+
+  pr-check-result:
+    # 稳定 final check：branch protection 绑定此 job。
+    needs: [detect-change-scope, process-check, runtime-check]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Aggregate results
+        run: |
+          set -euo pipefail
+          echo "detect-change-scope: ${{ needs.detect-change-scope.result }}"
+          echo "process-check:       ${{ needs.process-check.result }}"
+          echo "runtime-check:       ${{ needs.runtime-check.result }} (skipped 视为通过)"
+          fail=0
+          [ "${{ needs.detect-change-scope.result }}" = "success" ] || fail=1
+          [ "${{ needs.process-check.result }}" = "success" ] || fail=1
+          case "${{ needs.runtime-check.result }}" in
+            success|skipped) ;;
+            *) fail=1 ;;
+          esac
+          if [ "$fail" -ne 0 ]; then
+            echo "pr-check 失败"; exit 1
+          fi
+          echo "pr-check 通过"

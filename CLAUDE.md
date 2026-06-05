@@ -150,3 +150,13 @@ RAGFlow supports switching between Elasticsearch (default) and Infinity:
 6. No sycophantic openers or closing fluff.
 7. Keep solutions simple and direct.
 8. User instructions always override this file.
+
+## AI Issue-to-Production 工程流程（二开 / public / ACR）
+
+本仓库是 `infiniflow/ragflow` 的二开 fork，采用公司 AI Issue-to-Production 交付流程。任何 Issue / PR / 镜像构建 / 部署 / 回滚工作前，先使用 `ai-issue-to-production` skill；若当前框架不能自动加载，从公司级 skill 源仓库读取。
+
+- 发布源 = PR target = 镜像构建源：`dev`（不直接提交 `dev` / `main`，一律走 PR）。
+- 上游基线 `main`，上游同步是独立关口，不与功能 PR 混合。
+- 生产镜像：`registry.cn-chengdu.aliyuncs.com/lmzjai/ragflow-lmzj:<完整40位SHA>`，禁 `latest` / 短 SHA。
+- PR 用 `Refs #<issue>`，禁 `Closes/Fixes/Resolves`；PR 合并 ≠ 部署；部署仅人工确认完整 SHA 后触发；生产只 pull-only。
+- 流程与运维文档在 `lmzj-docs/`（禁止写入上游 `docs/`）：项目画像、治理画像、release runbook。
