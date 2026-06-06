@@ -143,6 +143,21 @@ user_default_llm:
 #     client_id: "your_client_id"
 #     client_secret: "your_client_secret"
 #     redirect_uri: "https://your-app.com/v1/user/oauth/callback/github"
+
+# 公司「灵眸智界 SSO」OIDC 接入（lmzj 渠道）。
+# client_id/secret 由服务器 .env 注入（${LMZJ_SSO_CLIENT_ID} / ${LMZJ_SSO_CLIENT_SECRET}），不入库。
+# 回调路径对应 restful_apis 蓝图前缀 /api/v1，即 /api/v1/auth/oauth/lmzj/callback。
+oauth:
+  lmzj:
+    type: oidc
+    display_name: "灵眸智界 SSO"
+    icon: "sso"
+    issuer: "https://sso.lmzjai.com"
+    client_id: "${LMZJ_SSO_CLIENT_ID}"
+    client_secret: "${LMZJ_SSO_CLIENT_SECRET}"
+    scope: "openid profile email"
+    redirect_uri: "https://edu.lmzjai.com/api/v1/auth/oauth/lmzj/callback"
+
 # authentication:
 #  client:
 #    switch: false
