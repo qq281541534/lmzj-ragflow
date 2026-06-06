@@ -143,9 +143,10 @@ class OAuthClient:
 
     def normalize_user_info(self, user_info):
         email = user_info.get("email")
-        username = user_info.get("username", str(email).split("@")[0])
-        nickname = user_info.get("nickname", username)
-        avatar_url = user_info.get("avatar_url", None)
-        if avatar_url is None:
-            avatar_url = user_info.get("picture", "")
+        # Honor explicit username/nickname/avatar_url first, then fall back to
+        # standard OIDC claims (preferred_username / name / picture) before the
+        # last-resort email prefix. Keeps non-OIDC providers working unchanged.
+        username = user_info.get("username") or user_info.get("preferred_username") or str(email).split("@")[0]
+        nickname = user_info.get("nickname") or user_info.get("name") or username
+        avatar_url = user_info.get("avatar_url") or user_info.get("picture") or ""
         return UserInfo(email=email, username=username, nickname=nickname, avatar_url=avatar_url)
