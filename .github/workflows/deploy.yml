@@ -23,6 +23,8 @@ jobs:
     runs-on: ubuntu-latest
     environment: production   # 触发 required reviewer 审批门
     steps:
+      - uses: actions/checkout@v4   # 需要仓库内的 scripts/deploy_pull_only.sh 才能 scp 到生产
+
       - name: Validate full 40-char SHA
         run: |
           set -euo pipefail
