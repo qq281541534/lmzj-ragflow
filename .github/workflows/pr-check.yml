@@ -54,10 +54,11 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.13"
+      # 只跑 ruff lint（上游 RAGFlow 全仓 lint-clean）。不跑 `ruff format --check`：
+      # 上游代码未按 ruff format 风格统一，全仓 format 门会在每个 runtime PR 上误报，
+      # 且强行 reformat 会与上游同步产生大面积冲突。lint 才是上游维护的实际标准。
       - name: Ruff lint
         run: uvx ruff check .
-      - name: Ruff format check
-        run: uvx ruff format --check .
 
   pr-check-result:
     # 稳定 final check：branch protection 绑定此 job。
