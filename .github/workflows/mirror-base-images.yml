@@ -1,0 +1,45 @@
+name: mirror-base-images
+
+# 把 RAGFlow 依赖的 Docker Hub 基础镜像搬运到自有 ACR，使国内生产服务器零外部依赖。
+# GitHub 托管 runner 直连 Docker Hub 拉取，重打 ACR tag 后推送。
+# 基础镜像版本升级时手动触发（Actions -> mirror-base-images -> Run workflow）。
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Login to ACR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ vars.ACR_REGISTRY }}
+          username: ${{ secrets.ALIYUN_ACR_USERNAME }}
+          password: ${{ secrets.ALIYUN_ACR_PASSWORD }}
+
+      - name: Mirror base images (Docker Hub -> ACR)
+        run: |
+          set -euo pipefail
+          NS="${{ vars.ACR_REGISTRY }}/${{ vars.ACR_NAMESPACE }}"
+          mirror() {
+            src="$1"; dst="$2"
+            echo "==> ${src}  ->  ${dst}"
+            docker pull "${src}"
+            docker tag "${src}" "${dst}"
+            docker push "${dst}"
+          }
+          mirror "mysql:8.0.39"                             "${NS}/mysql:8.0.39"
+          mirror "valkey/valkey:8"                          "${NS}/valkey:8"
+          mirror "pgsty/minio:RELEASE.2026-03-25T00-00-00Z" "${NS}/minio:RELEASE.2026-03-25T00-00-00Z"
+          mirror "infiniflow/infinity:v0.7.0"               "${NS}/infinity:v0.7.0"
+          {
+            echo "### 基础镜像已搬运到 ACR"
+            echo "- ${NS}/mysql:8.0.39"
+            echo "- ${NS}/valkey:8"
+            echo "- ${NS}/minio:RELEASE.2026-03-25T00-00-00Z"
+            echo "- ${NS}/infinity:v0.7.0"
+          } >> "$GITHUB_STEP_SUMMARY"
