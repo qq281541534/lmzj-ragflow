@@ -145,6 +145,10 @@ docker compose up -d
   - `lmzjai/mysql:8.0.39`、`lmzjai/valkey:8`、`lmzjai/minio:RELEASE.2026-03-25T00-00-00Z`、`lmzjai/infinity:v0.7.0`
 - 服务器从 ACR 拉取后 **retag 回原始名**（`docker tag <acr>/mysql:8.0.39 mysql:8.0.39` …），vanilla compose 无需改动即可使用。**生产零外部镜像依赖。**
 
+> ⚠️ **base 镜像版本升级时必须先 mirror**（已知坑）：日常 `deploy.yml` 只拉应用镜像（ragflow-lmzj）；base 镜像（mysql/valkey/minio/infinity）沿用服务器本地副本。当 RAGFlow 升级带来**新的 base 镜像版本**（如 `mysql:8.0.40`、`infinity:vX`）时，`docker compose up -d` 会尝试从 **Docker Hub** 拉新 base → **国内拉不动 → 部署卡住/失败**。
+>
+> 处理流程：升级前先 (1) 更新 `mirror-base-images.yml` 里的版本并手动触发，把新 base 搬到 ACR；(2) 在服务器 `docker pull <acr>/<name>:<newtag> && docker tag` 回原始名；(3) 再走治理版 `deploy.yml` 部署应用镜像。判断是否涉及 base 升级：对比新版 `docker/docker-compose-base.yml` 的 `image:` 行与服务器本地已有 tag。
+
 ### TLS（HTTPS）
 
 - 证书（Nginx 格式）：`fullchain.pem` + `privkey.pem` 放 `~/software/lmzj-ragflow/nginx/ssl/`。
