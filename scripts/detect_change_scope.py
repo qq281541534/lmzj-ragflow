@@ -43,6 +43,8 @@ RULES: list[tuple[str, str]] = [
     ("process-only", ".github/workflows/pr-check.yml"),
     ("process-only", "scripts/pr_process_lint.py"),
     ("process-only", "scripts/detect_change_scope.py"),
+    # 兜底：其余 .github/** 均为 CI/process（build/deploy workflow 已在前面优先匹配 release-governance）
+    ("process-only", ".github/*"),
     # docs-only
     ("docs-only", "docs/*"),
     ("docs-only", "lmzj-docs/*"),
