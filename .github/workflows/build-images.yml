@@ -104,16 +104,14 @@ jobs:
         run: |
           set -euo pipefail
           IMAGE="${{ vars.ACR_REGISTRY }}/${{ vars.ACR_NAMESPACE }}/${{ vars.ACR_REPOSITORY }}:${{ github.sha }}"
-          # Registry 层缓存：复用上次构建的层，使前后镜像的层 digest 一致 → 生产侧只需拉取增量层
-          # （而非每次全量 ~12GB），省磁盘、快、避免大拉取超时/断连。
-          CACHE="${{ vars.ACR_REGISTRY }}/${{ vars.ACR_NAMESPACE }}/${{ vars.ACR_REPOSITORY }}:buildcache"
-          echo "Building ${IMAGE} (cache: ${CACHE})"
+          # 注：阿里云 ACR 不支持 buildkit registry 层缓存 manifest（denied: unknown manifest
+          # class for application/vnd.buildkit.cacheconfig.v0），故不用 --cache-to type=registry。
+          # 镜像更新通过 maintenance-swap 处理（停 ragflow-cpu → 删旧镜像腾盘 → 拉新 → 起，见 runbook）。
+          echo "Building ${IMAGE}"
           docker buildx build \
             --build-arg NEED_MIRROR="${NEED_MIRROR}" \
             -t "${IMAGE}" \
             -f Dockerfile \
-            --cache-from "type=registry,ref=${CACHE}" \
-            --cache-to "type=registry,ref=${CACHE},mode=max,image-manifest=true,oci-mediatypes=true" \
             --push \
             --metadata-file /tmp/build-meta.json \
             .

@@ -170,14 +170,21 @@ docker compose up -d
 - 证书有效期至 `2026-09-04`，到期前需续期并替换 `nginx/ssl/` 后 `nginx -s reload`。
 - 待办：HTTP/2、HSTS 等可后续在 nginx 加强。
 
-### 镜像层缓存与磁盘约束（重要）
+### 镜像更新（maintenance-swap）与磁盘约束（重要）
 
-服务器盘固定 40GB，RAGFlow 镜像每个 ~12.6GB。**两个完整镜像 + 数据 + swap 装不下**，所以镜像更新策略关键：
+服务器盘固定 40GB，RAGFlow 镜像每个 ~12.6GB，**两个完整镜像 + 数据 + swap 装不下**。
 
-- `build-images.yml` 已启用 **registry 层缓存**（`--cache-from/--cache-to ...:buildcache`）。从有缓存的基线起，后续构建复用层 → 前后镜像层 digest 一致 → 生产侧 `docker pull` **只拉增量层**（几百 MB），省盘、快、避免大拉取 TLS 超时/SSH 断连。
-- **一次性基线**：层缓存对历史镜像无追溯效果。第一个启用缓存后的镜像与旧镜像（如 `a3a9cac4`，无缓存）不共享层，仍是一次约 12GB 全量拉取。建议放在维护窗口、且先腾盘（`docker compose stop ragflow-cpu && docker rmi <旧SHA>` 再拉新，或确保 ≥15GB 空闲）。此后的更新才是小增量。
-- 每次部署/重建后**立即复验 443**（`curl -sk --resolve edu.lmzjai.com:443:127.0.0.1 https://edu.lmzjai.com/`）。
+- **ACR 不支持 buildkit registry 层缓存**（`denied: unknown manifest class for application/vnd.buildkit.cacheconfig.v0`），故 `build-images.yml` 用普通构建、不做 `--cache-to`。即每次更新都是一次约 12GB 全量拉取,生产侧 `deploy.yml` 的 alongside-pull 装不下。
+- **镜像更新走 maintenance-swap（串行,约 15min 停机）**,不用治理版 `deploy.yml`(其 pull-only 不腾盘):
+  1. `cd ~/software/lmzj-ragflow`;`sed -i 's|^RAGFLOW_IMAGE=.*|RAGFLOW_IMAGE=<新镜像全引用>|' .env`
+  2. `COMPOSE_PROFILES=infinity,cpu docker compose stop ragflow-cpu && docker compose rm -f ragflow-cpu`
+  3. `docker rmi <旧镜像全引用>`(腾出 ~12GB)
+  4. **后台串行**拉新镜像:`nohup docker pull <新镜像> >/tmp/pull.log 2>&1 &`,**等它完全结束**(`docker image inspect` 通过且无 `docker pull` 进程),期间**不要并发任何 docker 操作**(否则 compose/pull 撞锁卡死)
+  5. `COMPOSE_PROFILES=infinity,cpu docker compose up -d --no-build`(nginx 挂载已在 `docker-compose.yml` 内)
+  6. **立即复验 443**(`curl -sk --resolve edu.lmzjai.com:443:127.0.0.1 https://edu.lmzjai.com/` 应 200)+ SSO 渠道
+- 回滚:旧镜像仍在 ACR;失败时把 `.env` 的 `RAGFLOW_IMAGE` 改回旧 SHA、重拉、`up -d`。
+- **HTTPS 持久化**:`docker-compose.yml` 把 https 配置挂到 `ragflow.conf.python`(entrypoint 复制的源),容器重建会自动重新应用,443 不再丢失(详见 `deploy/prod/README.md`)。
 
 ### 部署配置版本化
 
-脱离镜像的部署配置（nginx 站点配置、compose override）在 [`deploy/prod/`](../deploy/prod/README.md) 版本化，作为可恢复源（曾因仅存服务器被覆盖导致 HTTPS 掉线）。TLS 证书与 `.env` 密钥不版本化、仅存服务器。
+脱离镜像的 nginx https 站点配置在 [`deploy/prod/`](../deploy/prod/README.md) 版本化,作为可恢复源(曾因仅存服务器被覆盖导致 HTTPS 掉线);该配置在服务器 `docker-compose.yml` 的 `ragflow-cpu` 挂载中启用(挂到 `ragflow.conf.python` 源,绕开 entrypoint 的 cp 覆盖)。TLS 证书与 `.env` 密钥不版本化、仅存服务器。
