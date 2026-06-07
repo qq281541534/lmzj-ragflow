@@ -30,6 +30,7 @@ RULES: list[tuple[str, str]] = [
     ("release-governance", "lmzj-docs/release-runbook.md"),
     ("release-governance", "lmzj-docs/governance-profile.md"),
     ("release-governance", "lmzj-docs/project-profile.md"),
+    ("release-governance", "deploy/*"),  # 生产部署配置（nginx/compose override 等），非应用镜像
     # process-only：agent 规则、CI 元、流程脚本（精确文件先于 docs 通配，避免 *.md 误吞）
     ("process-only", "AGENTS.md"),
     ("process-only", "CLAUDE.md"),

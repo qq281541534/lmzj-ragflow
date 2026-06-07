@@ -104,11 +104,16 @@ jobs:
         run: |
           set -euo pipefail
           IMAGE="${{ vars.ACR_REGISTRY }}/${{ vars.ACR_NAMESPACE }}/${{ vars.ACR_REPOSITORY }}:${{ github.sha }}"
-          echo "Building ${IMAGE}"
+          # Registry 层缓存：复用上次构建的层，使前后镜像的层 digest 一致 → 生产侧只需拉取增量层
+          # （而非每次全量 ~12GB），省磁盘、快、避免大拉取超时/断连。
+          CACHE="${{ vars.ACR_REGISTRY }}/${{ vars.ACR_NAMESPACE }}/${{ vars.ACR_REPOSITORY }}:buildcache"
+          echo "Building ${IMAGE} (cache: ${CACHE})"
           docker buildx build \
             --build-arg NEED_MIRROR="${NEED_MIRROR}" \
             -t "${IMAGE}" \
             -f Dockerfile \
+            --cache-from "type=registry,ref=${CACHE}" \
+            --cache-to "type=registry,ref=${CACHE},mode=max,image-manifest=true,oci-mediatypes=true" \
             --push \
             --metadata-file /tmp/build-meta.json \
             .
