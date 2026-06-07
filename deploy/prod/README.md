@@ -1,36 +1,43 @@
 # deploy/prod — 生产部署配置（版本化源）
 
-生产服务器 `~/software/lmzj-ragflow/` 下**脱离镜像的部署配置**的版本化源。这些文件经 `docker-compose.yml` 的 bind mount 注入容器,**不在镜像里**,也**不在 pull-only 部署的自动同步范围**——历史上曾因只存在于服务器而被覆盖丢失,导致 HTTPS 掉线。此目录即为防丢的可恢复源。
+生产服务器 `~/software/lmzj-ragflow/` 是首次部署时从仓库 `docker/` 拷贝、**非 git clone、无 git 追踪**,可直接在服务器上编辑。本目录只保存「脱离镜像、又不该随 `.env`/证书外泄」的配置的**可恢复源**——历史上 nginx 的 https 配置因只存在于服务器、被覆盖而丢失,导致 HTTPS 掉线。
 
-> ⚠️ 教训:2026-06-07 服务器上的 `nginx/ragflow.conf` 被退回为镜像默认(仅 80),443 停止监听、HTTPS 打不开。根因是该文件当时只在服务器、未版本化。
+## HTTPS 如何启用（官方积木 + 一个 entrypoint 坑）
 
-## 内容
+RAGFlow 官方无 HTTPS 教程,但提供了积木:`docker-compose.yml` 里有(被注释的)nginx 挂载位,仓库自带 `docker/nginx/ragflow.https.conf` 模板。
 
-| 文件 | 对应服务器路径 | 说明 |
-|---|---|---|
-| `nginx/ragflow.conf` | `~/software/lmzj-ragflow/nginx/ragflow.conf` | HTTPS 站点配置(80→301→443,`server_name edu.lmzjai.com`) |
-| `docker-compose.override.yml` | `~/software/lmzj-ragflow/docker-compose.override.yml` | 给 `ragflow-cpu` 追加挂载:上面的 nginx 配置 + `./nginx/ssl`(证书) |
+**坑**:`entrypoint.sh` 每次启动执行 `cp -f /etc/nginx/conf.d/ragflow.conf.python /etc/nginx/conf.d/ragflow.conf`(默认 python 后端)。所以**不能**把 https 配置挂到目标 `ragflow.conf`(会被这条 cp 覆盖回 http-only);要挂到**源** `ragflow.conf.python`,让 entrypoint 反而把我们的 https 配置应用上去,且容器重建后自动生效。
 
-## 不在此目录(不版本化)的内容
+**做法**:直接编辑服务器 `~/software/lmzj-ragflow/docker-compose.yml`,在 `ragflow-cpu` 的 `volumes:` 下加两行(取代官方注释的那行 nginx 挂载):
 
-- `nginx/ssl/{fullchain.pem,privkey.pem}` — TLS 证书/私钥,仅存服务器,到期手动续。
-- `.env` — 含密钥(DB/MinIO/Redis 密码、`LMZJ_SSO_CLIENT_ID/SECRET`),仅存服务器。
-- `service_conf.yaml.template` — 由 `docker/service_conf.yaml.template`(git)同步,密钥用 `${ENV}` 占位。
+```yaml
+    volumes:
+      - ./ragflow-logs:/ragflow/logs
+      - ./nginx/ragflow.conf:/etc/nginx/conf.d/ragflow.conf.python   # 挂到 entrypoint 复制的“源”
+      - ./nginx/ssl:/etc/nginx/ssl                                    # TLS 证书目录
+      - ./service_conf.yaml.template:/ragflow/conf/service_conf.yaml.template
+      - ./entrypoint.sh:/ragflow/entrypoint.sh
+```
 
-## 同步到服务器(手动,直到部署自动化覆盖配置同步)
+`nginx/ragflow.conf`（本目录）= https 站点配置(基于官方 `ragflow.https.conf`,`server_name edu.lmzjai.com`,80→301→443,证书路径 `/etc/nginx/ssl/{fullchain.pem,privkey.pem}`)。
+
+## 不版本化（仅存服务器）
+
+- `nginx/ssl/{fullchain.pem,privkey.pem}` — TLS 证书/私钥,到期手动续。
+- `.env` — 含密钥(DB/MinIO/Redis、`LMZJ_SSO_CLIENT_ID/SECRET`)。
+- `service_conf.yaml.template` — 服务器版含 `oauth.lmzj`,密钥用 `${ENV}` 占位(对应 git `docker/service_conf.yaml.template`)。
+
+## 恢复 / 应用 nginx 配置
 
 ```bash
-# 从仓库根目录
-scp deploy/prod/nginx/ragflow.conf      ubuntu@<host>:~/software/lmzj-ragflow/nginx/ragflow.conf
-scp deploy/prod/docker-compose.override.yml ubuntu@<host>:~/software/lmzj-ragflow/docker-compose.override.yml
-# 重载 nginx（不重建容器）
-ssh ubuntu@<host> 'docker exec lmzj-ragflow-ragflow-cpu-1 nginx -t && docker exec lmzj-ragflow-ragflow-cpu-1 nginx -s reload'
-# 验证
+# 1. 推 https 配置到服务器（若丢失/更新）
+scp deploy/prod/nginx/ragflow.conf ubuntu@<host>:~/software/lmzj-ragflow/nginx/ragflow.conf
+# 2. 让运行中的容器生效（重跑 entrypoint 的 cp 源→目标 + reload；或 force-recreate）
+ssh ubuntu@<host> 'docker exec lmzj-ragflow-ragflow-cpu-1 cp -f /etc/nginx/conf.d/ragflow.conf.python /etc/nginx/conf.d/ragflow.conf \
+  && docker exec lmzj-ragflow-ragflow-cpu-1 nginx -t \
+  && docker exec lmzj-ragflow-ragflow-cpu-1 nginx -s reload'
+# 3. 验证
 ssh ubuntu@<host> 'curl -sk -o /dev/null -w "%{http_code}\n" --resolve edu.lmzjai.com:443:127.0.0.1 https://edu.lmzjai.com/'
 ```
 
-> 改 compose mount(非仅 nginx 内容)时,需 `docker compose up -d --force-recreate ragflow-cpu`(不带 `-f`,以加载 override),并**重建后立即复验 443**。
-
-## 待办(后续硬化)
-
-- 让治理版 `deploy.yml` / `deploy_pull_only.sh` 在每次部署时从仓库同步 `deploy/prod/*` 与 `docker/service_conf.yaml.template` 到服务器(排除 `.env`、`nginx/ssl/`),彻底消除配置漂移。
+> 改 `docker-compose.yml` 的 mount 结构后,需 `COMPOSE_PROFILES=infinity,cpu docker compose up -d --force-recreate ragflow-cpu`,并**重建后立即复验 443**。
