@@ -169,3 +169,15 @@ docker compose up -d
 - 云安全组仅放 `80/443` + 自定义 SSH 端口。
 - 证书有效期至 `2026-09-04`，到期前需续期并替换 `nginx/ssl/` 后 `nginx -s reload`。
 - 待办：HTTP/2、HSTS 等可后续在 nginx 加强。
+
+### 镜像层缓存与磁盘约束（重要）
+
+服务器盘固定 40GB，RAGFlow 镜像每个 ~12.6GB。**两个完整镜像 + 数据 + swap 装不下**，所以镜像更新策略关键：
+
+- `build-images.yml` 已启用 **registry 层缓存**（`--cache-from/--cache-to ...:buildcache`）。从有缓存的基线起，后续构建复用层 → 前后镜像层 digest 一致 → 生产侧 `docker pull` **只拉增量层**（几百 MB），省盘、快、避免大拉取 TLS 超时/SSH 断连。
+- **一次性基线**：层缓存对历史镜像无追溯效果。第一个启用缓存后的镜像与旧镜像（如 `a3a9cac4`，无缓存）不共享层，仍是一次约 12GB 全量拉取。建议放在维护窗口、且先腾盘（`docker compose stop ragflow-cpu && docker rmi <旧SHA>` 再拉新，或确保 ≥15GB 空闲）。此后的更新才是小增量。
+- 每次部署/重建后**立即复验 443**（`curl -sk --resolve edu.lmzjai.com:443:127.0.0.1 https://edu.lmzjai.com/`）。
+
+### 部署配置版本化
+
+脱离镜像的部署配置（nginx 站点配置、compose override）在 [`deploy/prod/`](../deploy/prod/README.md) 版本化，作为可恢复源（曾因仅存服务器被覆盖导致 HTTPS 掉线）。TLS 证书与 `.env` 密钥不版本化、仅存服务器。
