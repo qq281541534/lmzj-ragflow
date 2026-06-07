@@ -46,14 +46,14 @@ jobs:
       - name: Copy pull-only deploy script
         run: |
           set -euo pipefail
-          scp -i ~/.ssh/id_deploy -P "${{ secrets.PROD_SSH_PORT }}" \
+          scp -i ~/.ssh/id_deploy -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -P "${{ secrets.PROD_SSH_PORT }}" \
             scripts/deploy_pull_only.sh \
             "${{ secrets.PROD_SSH_USER }}@${{ secrets.PROD_SSH_HOST }}:${{ secrets.PROD_DEPLOY_PATH }}/deploy_pull_only.sh"
 
       - name: Pull-only deploy on production
         run: |
           set -euo pipefail
-          ssh -i ~/.ssh/id_deploy -p "${{ secrets.PROD_SSH_PORT }}" \
+          ssh -i ~/.ssh/id_deploy -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -p "${{ secrets.PROD_SSH_PORT }}" \
             "${{ secrets.PROD_SSH_USER }}@${{ secrets.PROD_SSH_HOST }}" \
             "ACR_REGISTRY='${{ vars.ACR_REGISTRY }}' \
              ACR_USERNAME='${{ secrets.ALIYUN_ACR_USERNAME }}' \
